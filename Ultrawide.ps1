@@ -9,3 +9,4 @@ Start-Sleep 3
 & "$env:ProgramFiles\LGTV Companion\LGTV Companion.exe" -of -screenoff -sethdmi1 Device1 "Living Room"
 
 & "$env:USERPROFILE\scoop\shims\autohotkey.exe" .\desktop.ahk
+& "$env:LOCALAPPDATA\Playnite\Playnite.DesktopApp.exe"
