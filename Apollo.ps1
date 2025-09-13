@@ -1,12 +1,11 @@
 # Apollo.ps1
-# Apollo script: launches Playnite and/or Steam Big Picture based on -Mode argument
+# Apollo script: launches Playnite and/or Steam Big Picture based on global frontend config
 
-param(
-    [ValidateSet("Playnite", "Steam")]
-    [string]$Mode = "Playnite"
-)
+Import-Module "$PSScriptRoot\SharedLibrary.psm1"
 
-if ($Mode -eq "Playnite") {
+$Frontend = Get-ConsoleFrontend
+
+if ($Frontend -eq "Playnite") {
     Start-Process "$env:ProgramFiles (x86)\Steam\steam.exe" -ArgumentList "-start steam://open/bigpicture"
     Start-Sleep -Seconds 5
 
@@ -20,6 +19,6 @@ if ($Mode -eq "Playnite") {
     & "$env:LOCALAPPDATA\Playnite\Playnite.FullscreenApp.exe"
     Start-Sleep -Seconds 10
     nircmd.exe win activate process "Playnite.FullscreenApp.exe"
-} elseif ($Mode -eq "Steam") {
+} elseif ($Frontend -eq "Steam") {
     Start-Process "$env:ProgramFiles (x86)\Steam\steam.exe" -ArgumentList "-start steam://open/bigpicture"
 }
