@@ -8,7 +8,7 @@ $Frontend = Get-ConsoleFrontend
 & "$env:ProgramFiles (x86)\Steam\steam.exe" -start steam://close/bigpicture
 
 Start-Sleep 3
-& "$env:ProgramFiles\LGTV Companion\LGTV Companion.exe" -of -screenoff -sethdmi1 Device1 "Living Room"
+& "$env:ProgramFiles\LGTV Companion\LGTV Companion.exe" -of -poweroff -sethdmi1 Device1 "Living Room"
 
 & "$env:USERPROFILE\scoop\shims\autohotkey.exe" .\desktop.ahk
 
