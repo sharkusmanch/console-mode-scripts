@@ -42,7 +42,10 @@ try {
 
     Set-RTSS-Frame-Limit -configFilePath "$env:USERPROFILE\scoop\persist\rtss\Profiles\Global" -newLimit 120
 
-    & "$env:ProgramData\chocolatey\bin\MonitorSwitcher.exe" -load:"$env:APPDATA\MonitorSwitcher\Profiles\TV.xml"
+    $profileSwitched = Switch-MonitorProfile -ProfileName "TV" -MaxRetries 3 -RetryDelaySeconds 2
+    if (-not $profileSwitched) {
+        Write-ConsoleLog "Monitor profile switch failed after retries" -Level ERROR
+    }
 
     if ($Frontend -eq "Playnite") {
         # Start Playnite first since it takes longer to load

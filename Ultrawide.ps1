@@ -6,7 +6,10 @@ $Frontend = Get-ConsoleFrontend
 try {
     Set-RTSS-Frame-Limit -configFilePath "$env:USERPROFILE\scoop\persist\rtss\Profiles\Global" -newLimit 0
 
-    & "$env:ProgramData\chocolatey\bin\MonitorSwitcher.exe" -load:"$env:APPDATA\MonitorSwitcher\Profiles\Ultrawide.xml"
+    $profileSwitched = Switch-MonitorProfile -ProfileName "Ultrawide" -MaxRetries 3 -RetryDelaySeconds 2
+    if (-not $profileSwitched) {
+        Write-ConsoleLog "Monitor profile switch failed after retries" -Level ERROR
+    }
     & "$env:ProgramFiles (x86)\Steam\steam.exe" -start steam://close/bigpicture
 
     Start-Sleep 3

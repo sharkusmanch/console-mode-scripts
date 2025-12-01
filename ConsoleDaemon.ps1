@@ -78,6 +78,9 @@ if (-not (Enter-SingleInstance -Name "ConsoleDaemon")) {
 Test-Dependencies | Out-Null
 Test-MonitorProfiles | Out-Null
 
+# Rotate logs on startup
+Invoke-LogRotation -MaxLines 1000 -MaxSizeKB 1024
+
 $tvScript = Join-Path $scriptDir "TV.ps1"
 $uwScript = Join-Path $scriptDir "Ultrawide.ps1"
 
@@ -262,6 +265,14 @@ $menuConfig.Add_Click({
 })
 $contextMenu.Items.Add($menuConfig) | Out-Null
 
+$menuReload = New-Object System.Windows.Forms.ToolStripMenuItem
+$menuReload.Text = "Reload Config"
+$menuReload.Add_Click({
+    $script:configLastModified = $null  # Force reload on next check
+    Write-ConsoleLog "Manual config reload requested"
+})
+$contextMenu.Items.Add($menuReload) | Out-Null
+
 $contextMenu.Items.Add((New-Object System.Windows.Forms.ToolStripSeparator)) | Out-Null
 
 $menuExit = New-Object System.Windows.Forms.ToolStripMenuItem
@@ -272,17 +283,86 @@ $contextMenu.Items.Add($menuExit) | Out-Null
 $trayIcon.ContextMenuStrip = $contextMenu
 
 # ==========================
+# Log Rotation Timer (hourly check)
+# ==========================
+
+$logRotationTimer = New-Object System.Windows.Forms.Timer
+$logRotationTimer.Interval = 3600000  # 1 hour
+
+$logRotationTimer.Add_Tick({
+    Invoke-LogRotation -MaxLines 1000 -MaxSizeKB 1024
+})
+
+# ==========================
+# Config File Watcher
+# ==========================
+
+$script:configLastModified = $null
+$configCheckTimer = New-Object System.Windows.Forms.Timer
+$configCheckTimer.Interval = 5000  # Check every 5 seconds
+
+$configCheckTimer.Add_Tick({
+    try {
+        $cfgPath = Get-ConsoleConfigPath
+        if (Test-Path $cfgPath) {
+            $lastWrite = (Get-Item $cfgPath).LastWriteTime
+            if ($null -eq $script:configLastModified) {
+                $script:configLastModified = $lastWrite
+            } elseif ($lastWrite -ne $script:configLastModified) {
+                $script:configLastModified = $lastWrite
+                Write-ConsoleLog "Config file changed, reloading..."
+
+                # Reload controller config
+                try {
+                    $newCfg = Get-Content -LiteralPath $cfgPath -Raw -ErrorAction Stop | ConvertFrom-Json
+                    if ($newCfg.PSObject.Properties['ControllerVidPid']) {
+                        $script:controllerVidPid = $newCfg.ControllerVidPid
+                    }
+                    if ($newCfg.PSObject.Properties['ControllerDebounceSeconds']) {
+                        $script:controllerDebounce = [int]$newCfg.ControllerDebounceSeconds
+                    }
+                    if ($newCfg.PSObject.Properties['ControllerPollSeconds']) {
+                        $newPoll = [int]$newCfg.ControllerPollSeconds
+                        if ($newPoll -ne $controllerPollSeconds) {
+                            $controllerTimer.Interval = $newPoll * 1000
+                        }
+                    }
+                    if ($newCfg.PSObject.Properties['ControllerEnabled']) {
+                        $newEnabled = [bool]$newCfg.ControllerEnabled
+                        if ($newEnabled -and -not $controllerTimer.Enabled) {
+                            $controllerTimer.Start()
+                            $menuController.Text = "Controller: Checking..."
+                        } elseif (-not $newEnabled -and $controllerTimer.Enabled) {
+                            $controllerTimer.Stop()
+                            $menuController.Text = "Controller: Disabled"
+                        }
+                    }
+                    Write-ConsoleLog "Config reloaded successfully"
+                    Show-ConsoleToast -Title "Console Daemon" -Message "Configuration reloaded"
+                } catch {
+                    Write-ConsoleLog "Failed to reload config: $_" -Level ERROR
+                }
+            }
+        }
+    } catch {
+        # Ignore file access errors during check
+    }
+})
+
+# ==========================
 # Controller Polling Timer
 # ==========================
+
+# Make controller config script-scoped for reload
+$script:controllerVidPid = $controllerVidPid
+$script:controllerDebounce = $controllerDebounce
 
 $controllerTimer = New-Object System.Windows.Forms.Timer
 $controllerTimer.Interval = $controllerPollSeconds * 1000
 
 $controllerTimer.Add_Tick({
-    if (-not $controllerEnabled) { return }
-
     try {
-        $isConnected = Test-ControllerConnected -VidPid $controllerVidPid
+        $isConnected = Test-ControllerConnected -VidPid $script:controllerVidPid
 
         # Update menu text
         $menuController.Text = "Controller: $(if ($isConnected) { 'Connected' } else { 'Disconnected' })"
@@ -292,12 +372,12 @@ $controllerTimer.Add_Tick({
             $now = Get-Date
             $elapsed = ($now - $script:lastTriggerTime).TotalSeconds
 
-            if ($elapsed -ge $controllerDebounce) {
+            if ($elapsed -ge $script:controllerDebounce) {
                 $script:lastTriggerTime = $now
                 Write-ConsoleLog "Controller connected - triggering TV mode"
                 Start-Process powershell -ArgumentList "-ExecutionPolicy Bypass -WindowStyle Hidden -File `"$tvScript`"" -WindowStyle Hidden
             } else {
-                Write-ConsoleLog "Controller connected but debounce active ($([int]$elapsed)s < ${controllerDebounce}s)"
+                Write-ConsoleLog "Controller connected but debounce active ($([int]$elapsed)s < $($script:controllerDebounce)s)"
             }
         }
 
@@ -342,6 +422,10 @@ $form.Add_Load({
         $menuController.Text = "Controller: Disabled"
     }
 
+    # Start auxiliary timers
+    $logRotationTimer.Start()
+    $configCheckTimer.Start()
+
     Write-ConsoleLog "Console daemon ready"
 })
 
@@ -349,6 +433,8 @@ $form.Add_FormClosing({
     Write-ConsoleLog "Console daemon shutting down"
 
     $controllerTimer.Stop()
+    $logRotationTimer.Stop()
+    $configCheckTimer.Stop()
 
     [HotkeyNative]::UnregisterHotKey($form.Handle, $HOTKEY_TV) | Out-Null
     [HotkeyNative]::UnregisterHotKey($form.Handle, $HOTKEY_UW) | Out-Null

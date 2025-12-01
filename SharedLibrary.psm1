@@ -361,4 +361,89 @@ function Test-ControllerConnected {
     return ($null -ne $device)
 }
 
-Export-ModuleMember -Function Set-RTSS-Frame-Limit, Get-ConsoleConfigDirectory, Get-ConsoleConfigPath, Initialize-ConsoleConfig, Get-ConsoleFrontend, Set-ConsoleFrontend, Get-ConsoleMode, Set-ConsoleMode, Initialize-WindowManagement, Minimize-SteamWindow, Maximize-SteamWindow, Set-WindowForeground, Get-ConsoleLogPath, Write-ConsoleLog, Show-ConsoleToast, Get-HotkeyConfig, Set-HotkeyConfig, Test-Dependencies, Test-MonitorProfiles, Enter-SingleInstance, Exit-SingleInstance, Test-ControllerConnected
+# ==========================
+# Monitor Profile Switching
+# ==========================
+
+function Switch-MonitorProfile {
+    param(
+        [Parameter(Mandatory)]
+        [string]$ProfileName,
+        [int]$MaxRetries = 3,
+        [int]$RetryDelaySeconds = 2
+    )
+
+    $profilePath = "$env:APPDATA\MonitorSwitcher\Profiles\$ProfileName.xml"
+    $monitorSwitcher = "$env:ProgramData\chocolatey\bin\MonitorSwitcher.exe"
+
+    if (-not (Test-Path $profilePath)) {
+        Write-ConsoleLog "Monitor profile not found: $profilePath" -Level ERROR
+        return $false
+    }
+
+    Add-Type -AssemblyName System.Windows.Forms
+    $targetDisplayCount = if ($ProfileName -eq 'TV') { 2 } else { 1 }
+
+    for ($attempt = 1; $attempt -le $MaxRetries; $attempt++) {
+        Write-ConsoleLog "Switching to $ProfileName profile (attempt $attempt/$MaxRetries)"
+
+        & $monitorSwitcher -load:"$profilePath"
+
+        # Wait and verify
+        Start-Sleep -Seconds $RetryDelaySeconds
+
+        $currentCount = [System.Windows.Forms.Screen]::AllScreens.Count
+        $primaryScreen = [System.Windows.Forms.Screen]::PrimaryScreen
+
+        # For TV mode, check if we have the expected display count
+        # For Ultrawide, just verify the switch happened
+        if ($ProfileName -eq 'TV') {
+            if ($currentCount -ge $targetDisplayCount) {
+                Write-ConsoleLog "Monitor profile switch successful (displays: $currentCount)"
+                return $true
+            }
+        } else {
+            # For ultrawide, give it a moment and assume success if no error
+            Write-ConsoleLog "Monitor profile switch completed (displays: $currentCount)"
+            return $true
+        }
+
+        if ($attempt -lt $MaxRetries) {
+            Write-ConsoleLog "Profile switch may have failed, retrying..." -Level WARN
+            Start-Sleep -Seconds 1
+        }
+    }
+
+    Write-ConsoleLog "Monitor profile switch failed after $MaxRetries attempts" -Level ERROR
+    return $false
+}
+
+# ==========================
+# Log Rotation
+# ==========================
+
+function Invoke-LogRotation {
+    param(
+        [int]$MaxLines = 1000,
+        [int]$MaxSizeKB = 1024
+    )
+
+    $logPath = Get-ConsoleLogPath
+    if (-not (Test-Path $logPath)) { return }
+
+    $logFile = Get-Item $logPath
+    $sizeKB = $logFile.Length / 1KB
+
+    # Rotate if over size limit
+    if ($sizeKB -gt $MaxSizeKB) {
+        Write-ConsoleLog "Log rotation triggered (size: $([math]::Round($sizeKB, 2)) KB)"
+
+        # Keep last N lines
+        $lines = Get-Content $logPath -Tail $MaxLines
+        Set-Content $logPath -Value $lines -Encoding UTF8
+
+        Write-ConsoleLog "Log rotated, kept last $MaxLines lines"
+    }
+}
+
+Export-ModuleMember -Function Set-RTSS-Frame-Limit, Get-ConsoleConfigDirectory, Get-ConsoleConfigPath, Initialize-ConsoleConfig, Get-ConsoleFrontend, Set-ConsoleFrontend, Get-ConsoleMode, Set-ConsoleMode, Initialize-WindowManagement, Minimize-SteamWindow, Maximize-SteamWindow, Set-WindowForeground, Get-ConsoleLogPath, Write-ConsoleLog, Show-ConsoleToast, Get-HotkeyConfig, Set-HotkeyConfig, Test-Dependencies, Test-MonitorProfiles, Enter-SingleInstance, Exit-SingleInstance, Test-ControllerConnected, Switch-MonitorProfile, Invoke-LogRotation

@@ -15,7 +15,9 @@ Scripts for switching between TV/console gaming mode and desktop/ultrawide mode 
 - Controller auto-detection (triggers TV mode when controller connects)
 - Single-instance enforcement (prevents duplicate daemons)
 - Dependency validation on startup
-- Error logging
+- Error logging with automatic rotation
+- Hot-reload configuration without restart
+- Retry logic for monitor profile switching
 
 ## Hotkeys (Default)
 
@@ -70,6 +72,7 @@ Right-click menu:
 - Manual TV/Ultrawide mode triggers
 - Open log file
 - Open config file
+- Reload config (applies changes without restart)
 - Exit
 
 ## Scripts
@@ -157,6 +160,12 @@ View logs via:
 - Run `.\Status.ps1`
 - Open the file directly
 
+### Log Rotation
+
+Logs are automatically rotated when they exceed 1MB. The daemon keeps the most recent 1000 lines. Rotation is checked:
+- On daemon startup
+- Every hour while running
+
 ## Dependencies
 
 - [LGTV Companion](https://github.com/JPersson77/LGTVCompanion) - LG TV control
@@ -166,6 +175,21 @@ View logs via:
 - [nircmd](https://www.nirsoft.net/utils/nircmd.html) - Window management
 
 Missing dependencies are logged as warnings on startup.
+
+## Hot Reload
+
+The daemon supports hot-reloading configuration without restart:
+
+1. **Automatic**: Edit `config.json` - changes are detected within 5 seconds
+2. **Manual**: Right-click tray icon > "Reload Config"
+
+Reloadable settings:
+- Controller VID/PID
+- Controller debounce time
+- Controller poll interval
+- Controller enable/disable
+
+Note: Hotkey changes require a daemon restart to take effect (hotkeys are registered at startup).
 
 ## Troubleshooting
 
