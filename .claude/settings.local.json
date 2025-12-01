@@ -3,7 +3,9 @@
     "allow": [
       "Bash(powershell:*)",
       "Bash(git add:*)",
-      "Bash(git commit -m \"$(cat <<''EOF''\nAdd system tray, logging, config hotkeys, and consolidate code\n\n- Add system tray icon with right-click menu (status, triggers, logs, config, exit)\n- Add toast notifications on mode switch\n- Add config-driven hotkeys (customizable in config.json)\n- Add error logging to %APPDATA%\\ConsoleModeScripts\\daemon.log\n- Add Status.ps1 for health check and status display\n- Consolidate duplicate Win32 window code into SharedLibrary.psm1\n- Add Install-HotkeyService.ps1 for scheduled task management\n- Remove unused files (AHK scripts, controller monitors, test files)\n- Update README with full documentation\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\n\nCo-Authored-By: Claude <noreply@anthropic.com>\nEOF\n)\")"
+      "Bash(git commit -m \"$(cat <<''EOF''\nAdd system tray, logging, config hotkeys, and consolidate code\n\n- Add system tray icon with right-click menu (status, triggers, logs, config, exit)\n- Add toast notifications on mode switch\n- Add config-driven hotkeys (customizable in config.json)\n- Add error logging to %APPDATA%\\ConsoleModeScripts\\daemon.log\n- Add Status.ps1 for health check and status display\n- Consolidate duplicate Win32 window code into SharedLibrary.psm1\n- Add Install-HotkeyService.ps1 for scheduled task management\n- Remove unused files (AHK scripts, controller monitors, test files)\n- Update README with full documentation\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\n\nCo-Authored-By: Claude <noreply@anthropic.com>\nEOF\n)\")",
+      "Bash(git push)",
+      "Bash(git commit:*)"
     ],
     "deny": [],
     "ask": []

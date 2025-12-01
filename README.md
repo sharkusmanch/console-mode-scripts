@@ -12,6 +12,7 @@ Scripts for switching between TV/console gaming mode and desktop/ultrawide mode 
 - System tray icon with right-click menu
 - Toast notifications on mode switch
 - Configurable hotkeys
+- Controller auto-detection (triggers TV mode when controller connects)
 - Error logging
 
 ## Hotkeys (Default)
@@ -68,6 +69,7 @@ When running, the daemon shows a green icon in the system tray. Right-click for:
 | Script | Description |
 |--------|-------------|
 | `hotkeys.ps1` | Global hotkey daemon with system tray |
+| `ControllerMonitor.ps1` | Auto-trigger TV mode when controller connects |
 | `TV.ps1` | Switch to TV mode - powers on LG TV, sets audio, caps framerate, loads TV profile, launches frontend |
 | `Ultrawide.ps1` | Switch to desktop mode - uncaps framerate, loads ultrawide profile, powers off TV |
 | `Apollo.ps1` | Launch frontend (Playnite or Steam BP) for streaming |
@@ -101,6 +103,36 @@ Configuration is stored in:
 - `Shift`
 - `Alt`
 - `Win`
+
+### Controller Auto-Detection
+
+The controller monitor can automatically trigger TV mode when your Bluetooth controller connects:
+
+```powershell
+# Install the controller monitor
+.\ControllerMonitor.ps1 -Install
+
+# Start it
+Start-ScheduledTask -TaskName 'ControllerMonitor'
+
+# Uninstall
+.\ControllerMonitor.ps1 -Uninstall
+```
+
+Configure the controller VID/PID and debounce time in config.json:
+
+```json
+{
+  "ControllerVidPid": "054C*0DF2",
+  "ControllerDebounceSeconds": 30,
+  "ControllerPollSeconds": 3
+}
+```
+
+Common controller VID/PIDs:
+- DualSense Edge: `054C*0DF2`
+- DualSense: `054C*0CE6`
+- Xbox Wireless: `045E*02E0`
 
 ### Set Frontend via PowerShell
 
