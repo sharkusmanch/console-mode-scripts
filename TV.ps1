@@ -4,6 +4,11 @@ Write-ConsoleLog "TV mode switch initiated"
 $Frontend = Get-ConsoleFrontend
 
 try {
+    # Get initial display count
+    Add-Type -AssemblyName System.Windows.Forms
+    $initialDisplayCount = [System.Windows.Forms.Screen]::AllScreens.Count
+    Write-ConsoleLog "Initial display count: $initialDisplayCount"
+
     # Try multiple power-on commands in case one fails
     & "$env:ProgramFiles\LGTV Companion\LGTV Companion.exe" -poweron Device1 "Living Room"
     Start-Sleep -Seconds 2
@@ -11,7 +16,29 @@ try {
 
     & "$env:USERPROFILE\scoop\apps\SoundVolumeView\current\SoundVolumeView.exe" /SetDefault "3- A50 Game" 3
 
-    Start-Sleep -Seconds 3
+    # Wait for TV to be detected as a display (up to 30 seconds)
+    $tvTimeout = 30
+    $tvElapsed = 0
+    $tvDetected = $false
+
+    Write-ConsoleLog "Waiting for TV display to be detected..."
+    while ($tvElapsed -lt $tvTimeout) {
+        Start-Sleep -Seconds 2
+        $tvElapsed += 2
+        $currentDisplayCount = [System.Windows.Forms.Screen]::AllScreens.Count
+
+        if ($currentDisplayCount -gt $initialDisplayCount) {
+            $tvDetected = $true
+            Write-ConsoleLog "TV detected as display after ${tvElapsed}s (displays: $currentDisplayCount)"
+            # Give it a moment to stabilize
+            Start-Sleep -Seconds 2
+            break
+        }
+    }
+
+    if (-not $tvDetected) {
+        Write-ConsoleLog "TV not detected as new display after ${tvTimeout}s, proceeding anyway" -Level WARN
+    }
 
     Set-RTSS-Frame-Limit -configFilePath "$env:USERPROFILE\scoop\persist\rtss\Profiles\Global" -newLimit 120
 
