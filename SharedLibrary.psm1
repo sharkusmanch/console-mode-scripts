@@ -309,10 +309,67 @@ function Test-MonitorProfiles {
 }
 
 # ==========================
-# Single Instance Mutex
+# Single Instance Mutex + PID File
 # ==========================
 
 $script:Mutex = $null
+
+function Get-DaemonPidPath {
+    param([string]$Name)
+    return (Join-Path (Get-ConsoleConfigDirectory) "$Name.pid")
+}
+
+function Test-OrphanedDaemon {
+    param(
+        [Parameter(Mandatory)]
+        [string]$Name
+    )
+    $pidPath = Get-DaemonPidPath -Name $Name
+    if (Test-Path $pidPath) {
+        $oldPid = Get-Content $pidPath -ErrorAction SilentlyContinue
+        if ($oldPid) {
+            $proc = Get-Process -Id $oldPid -ErrorAction SilentlyContinue
+            if ($proc) {
+                # Process exists - check if it's actually our daemon
+                try {
+                    $wmi = Get-WmiObject Win32_Process -Filter "ProcessId = $oldPid" -ErrorAction SilentlyContinue
+                    if ($wmi -and $wmi.CommandLine -like "*$Name*") {
+                        return @{ IsOrphaned = $false; Pid = [int]$oldPid; Process = $proc }
+                    }
+                } catch {}
+            }
+            # PID file exists but process is gone or different - orphaned
+            return @{ IsOrphaned = $true; Pid = [int]$oldPid; Process = $null }
+        }
+    }
+    return @{ IsOrphaned = $false; Pid = $null; Process = $null }
+}
+
+function Clear-OrphanedDaemons {
+    param(
+        [Parameter(Mandatory)]
+        [string]$Name
+    )
+
+    # Kill any PowerShell processes running this daemon
+    $killed = 0
+    Get-WmiObject Win32_Process -Filter "Name='powershell.exe'" -ErrorAction SilentlyContinue | ForEach-Object {
+        if ($_.CommandLine -like "*$Name*" -and $_.ProcessId -ne $PID) {
+            try {
+                Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue
+                $killed++
+            } catch {}
+        }
+    }
+
+    # Clean up PID file
+    $pidPath = Get-DaemonPidPath -Name $Name
+    if (Test-Path $pidPath) {
+        Remove-Item $pidPath -Force -ErrorAction SilentlyContinue
+    }
+
+    return $killed
+}
 
 function Enter-SingleInstance {
     param(
@@ -322,12 +379,42 @@ function Enter-SingleInstance {
     $mutexName = "Global\ConsoleModeScripts_$Name"
     $createdNew = $false
 
+    # First check for orphaned processes
+    $orphanCheck = Test-OrphanedDaemon -Name $Name
+    if ($orphanCheck.IsOrphaned) {
+        Write-ConsoleLog "Found orphaned PID file, cleaning up..." -Level WARN
+        $killed = Clear-OrphanedDaemons -Name $Name
+        if ($killed -gt 0) {
+            Write-ConsoleLog "Killed $killed orphaned daemon process(es)"
+        }
+        Start-Sleep -Seconds 1
+    } elseif ($orphanCheck.Process) {
+        # Valid running process exists
+        Write-ConsoleLog "$Name is already running (PID: $($orphanCheck.Pid))" -Level WARN
+        return $false
+    }
+
     try {
         $script:Mutex = New-Object System.Threading.Mutex($true, $mutexName, [ref]$createdNew)
         if (-not $createdNew) {
-            Write-ConsoleLog "$Name is already running" -Level WARN
-            return $false
+            # Mutex held but no valid PID - likely a zombie mutex, try to clean up
+            Write-ConsoleLog "Mutex held but no valid process found, attempting cleanup..." -Level WARN
+            $killed = Clear-OrphanedDaemons -Name $Name
+            Start-Sleep -Seconds 2
+
+            # Try again
+            $script:Mutex.Dispose()
+            $script:Mutex = New-Object System.Threading.Mutex($true, $mutexName, [ref]$createdNew)
+            if (-not $createdNew) {
+                Write-ConsoleLog "$Name is already running" -Level WARN
+                return $false
+            }
         }
+
+        # Write PID file
+        $pidPath = Get-DaemonPidPath -Name $Name
+        Set-Content -LiteralPath $pidPath -Value $PID -Encoding UTF8
+
         return $true
     } catch {
         Write-ConsoleLog "Failed to create mutex for $Name`: $_" -Level ERROR
@@ -336,6 +423,14 @@ function Enter-SingleInstance {
 }
 
 function Exit-SingleInstance {
+    param([string]$Name = "ConsoleDaemon")
+
+    # Remove PID file
+    $pidPath = Get-DaemonPidPath -Name $Name
+    if (Test-Path $pidPath) {
+        Remove-Item $pidPath -Force -ErrorAction SilentlyContinue
+    }
+
     if ($script:Mutex) {
         try {
             $script:Mutex.ReleaseMutex()
@@ -446,4 +541,4 @@ function Invoke-LogRotation {
     }
 }
 
-Export-ModuleMember -Function Set-RTSS-Frame-Limit, Get-ConsoleConfigDirectory, Get-ConsoleConfigPath, Initialize-ConsoleConfig, Get-ConsoleFrontend, Set-ConsoleFrontend, Get-ConsoleMode, Set-ConsoleMode, Initialize-WindowManagement, Minimize-SteamWindow, Maximize-SteamWindow, Set-WindowForeground, Get-ConsoleLogPath, Write-ConsoleLog, Show-ConsoleToast, Get-HotkeyConfig, Set-HotkeyConfig, Test-Dependencies, Test-MonitorProfiles, Enter-SingleInstance, Exit-SingleInstance, Test-ControllerConnected, Switch-MonitorProfile, Invoke-LogRotation
+Export-ModuleMember -Function Set-RTSS-Frame-Limit, Get-ConsoleConfigDirectory, Get-ConsoleConfigPath, Initialize-ConsoleConfig, Get-ConsoleFrontend, Set-ConsoleFrontend, Get-ConsoleMode, Set-ConsoleMode, Initialize-WindowManagement, Minimize-SteamWindow, Maximize-SteamWindow, Set-WindowForeground, Get-ConsoleLogPath, Write-ConsoleLog, Show-ConsoleToast, Get-HotkeyConfig, Set-HotkeyConfig, Test-Dependencies, Test-MonitorProfiles, Get-DaemonPidPath, Test-OrphanedDaemon, Clear-OrphanedDaemons, Enter-SingleInstance, Exit-SingleInstance, Test-ControllerConnected, Switch-MonitorProfile, Invoke-LogRotation

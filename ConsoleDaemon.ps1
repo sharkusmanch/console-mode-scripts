@@ -443,7 +443,7 @@ $form.Add_FormClosing({
     $trayIcon.Visible = $false
     $trayIcon.Dispose()
 
-    Exit-SingleInstance
+    Exit-SingleInstance -Name "ConsoleDaemon"
 })
 
 # ==========================
