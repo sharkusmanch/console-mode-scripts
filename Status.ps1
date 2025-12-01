@@ -2,57 +2,71 @@
 
 Import-Module "$PSScriptRoot\SharedLibrary.psm1" -Force
 
-$taskName = 'HotkeyDaemon'
-
 Write-Host "Console Mode Scripts - Status" -ForegroundColor Cyan
 Write-Host "=============================" -ForegroundColor Cyan
 Write-Host ""
 
-# Check scheduled task
-$task = Get-ScheduledTask -TaskName $taskName -ErrorAction SilentlyContinue
-if ($task) {
-    $taskInfo = Get-ScheduledTaskInfo -TaskName $taskName -ErrorAction SilentlyContinue
-    Write-Host "Scheduled Task:" -ForegroundColor Yellow
-    Write-Host "  Name:        $taskName"
-    Write-Host "  State:       $($task.State)"
-    if ($taskInfo.LastRunTime) {
-        Write-Host "  Last Run:    $($taskInfo.LastRunTime)"
+# Check for ConsoleDaemon (preferred) or legacy daemons
+$taskNames = @('ConsoleDaemon', 'HotkeyDaemon', 'ControllerMonitor')
+$foundTask = $false
+
+foreach ($taskName in $taskNames) {
+    $task = Get-ScheduledTask -TaskName $taskName -ErrorAction SilentlyContinue
+    if ($task) {
+        $taskInfo = Get-ScheduledTaskInfo -TaskName $taskName -ErrorAction SilentlyContinue
+        if (-not $foundTask) {
+            Write-Host "Scheduled Tasks:" -ForegroundColor Yellow
+        }
+        $stateColor = if ($task.State -eq 'Running') { 'Green' } else { 'Gray' }
+        Write-Host "  $taskName" -NoNewline
+        Write-Host " [$($task.State)]" -ForegroundColor $stateColor
+        if ($taskInfo.LastRunTime) {
+            Write-Host "    Last Run:  $($taskInfo.LastRunTime)"
+        }
+        $foundTask = $true
     }
-    if ($taskInfo.NextRunTime) {
-        Write-Host "  Next Run:    $($taskInfo.NextRunTime)"
-    }
-} else {
-    Write-Host "Scheduled Task: NOT INSTALLED" -ForegroundColor Red
-    Write-Host "  Run Install-HotkeyService.ps1 to install"
+}
+
+if (-not $foundTask) {
+    Write-Host "Scheduled Tasks: NONE INSTALLED" -ForegroundColor Red
+    Write-Host "  Run: .\ConsoleDaemon.ps1 -Install"
 }
 
 Write-Host ""
 
-# Check if daemon process is running
-$daemonProcess = Get-Process powershell -ErrorAction SilentlyContinue | Where-Object {
-    try {
-        $_.MainWindowTitle -eq "HotkeyDaemon" -or
-        ($_.CommandLine -and $_.CommandLine -like "*hotkeys.ps1*")
-    } catch { $false }
-}
+# Check daemon processes
+Write-Host "Running Processes:" -ForegroundColor Yellow
+$daemonPatterns = @('ConsoleDaemon', 'hotkeys', 'ControllerMonitor')
+$foundProcess = $false
 
-# Alternative: check for hidden form
-$hotkeyProcess = Get-Process powershell -ErrorAction SilentlyContinue | ForEach-Object {
+Get-Process powershell -ErrorAction SilentlyContinue | ForEach-Object {
     $proc = $_
     try {
         $wmiProc = Get-WmiObject Win32_Process -Filter "ProcessId = $($proc.Id)" -ErrorAction SilentlyContinue
-        if ($wmiProc.CommandLine -like "*hotkeys.ps1*") {
-            $proc
+        foreach ($pattern in $daemonPatterns) {
+            if ($wmiProc.CommandLine -like "*$pattern*") {
+                Write-Host "  $pattern" -NoNewline -ForegroundColor Green
+                Write-Host " (PID: $($proc.Id))"
+                $foundProcess = $true
+                break
+            }
         }
     } catch {}
 }
 
-Write-Host "Daemon Process:" -ForegroundColor Yellow
-if ($hotkeyProcess) {
-    Write-Host "  Status:      RUNNING" -ForegroundColor Green
-    Write-Host "  PID:         $($hotkeyProcess.Id)"
+if (-not $foundProcess) {
+    Write-Host "  No daemon processes running" -ForegroundColor Red
+}
+
+Write-Host ""
+
+# Controller status
+Write-Host "Controller:" -ForegroundColor Yellow
+$controllerConnected = Test-ControllerConnected
+if ($controllerConnected) {
+    Write-Host "  Status:      Connected" -ForegroundColor Green
 } else {
-    Write-Host "  Status:      NOT RUNNING" -ForegroundColor Red
+    Write-Host "  Status:      Disconnected" -ForegroundColor Gray
 }
 
 Write-Host ""
@@ -83,6 +97,18 @@ foreach ($key in @('TV', 'Ultrawide', 'Quit')) {
     $hk = $hotkeyConfig.$key
     $mods = ($hk.Modifiers -join '+')
     Write-Host "  ${key}:".PadRight(14) "$mods+$($hk.Key)"
+}
+
+Write-Host ""
+
+# Dependency check
+Write-Host "Dependencies:" -ForegroundColor Yellow
+$deps = Test-Dependencies
+$profiles = Test-MonitorProfiles
+if ($deps -and $profiles) {
+    Write-Host "  All dependencies found" -ForegroundColor Green
+} else {
+    Write-Host "  Check log for missing dependencies" -ForegroundColor Yellow
 }
 
 Write-Host ""

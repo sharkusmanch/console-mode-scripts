@@ -262,4 +262,103 @@ function Set-HotkeyConfig {
     Set-Content -LiteralPath $path -Value $json -Encoding UTF8
 }
 
-Export-ModuleMember -Function Set-RTSS-Frame-Limit, Get-ConsoleConfigDirectory, Get-ConsoleConfigPath, Initialize-ConsoleConfig, Get-ConsoleFrontend, Set-ConsoleFrontend, Get-ConsoleMode, Set-ConsoleMode, Initialize-WindowManagement, Minimize-SteamWindow, Maximize-SteamWindow, Set-WindowForeground, Get-ConsoleLogPath, Write-ConsoleLog, Show-ConsoleToast, Get-HotkeyConfig, Set-HotkeyConfig
+# ==========================
+# Dependency Validation
+# ==========================
+
+function Test-Dependencies {
+    $dependencies = @(
+        @{ Name = "LGTV Companion"; Path = "$env:ProgramFiles\LGTV Companion\LGTV Companion.exe" }
+        @{ Name = "MonitorSwitcher"; Path = "$env:ProgramData\chocolatey\bin\MonitorSwitcher.exe" }
+        @{ Name = "SoundVolumeView"; Path = "$env:USERPROFILE\scoop\apps\SoundVolumeView\current\SoundVolumeView.exe" }
+        @{ Name = "nircmd"; Path = (Get-Command nircmd.exe -ErrorAction SilentlyContinue).Source }
+    )
+
+    $missing = @()
+    foreach ($dep in $dependencies) {
+        if (-not $dep.Path -or -not (Test-Path $dep.Path -ErrorAction SilentlyContinue)) {
+            $missing += $dep.Name
+        }
+    }
+
+    if ($missing.Count -gt 0) {
+        Write-ConsoleLog "Missing dependencies: $($missing -join ', ')" -Level WARN
+        return $false
+    }
+    return $true
+}
+
+function Test-MonitorProfiles {
+    $profiles = @(
+        @{ Name = "TV"; Path = "$env:APPDATA\MonitorSwitcher\Profiles\TV.xml" }
+        @{ Name = "Ultrawide"; Path = "$env:APPDATA\MonitorSwitcher\Profiles\Ultrawide.xml" }
+    )
+
+    $missing = @()
+    foreach ($profile in $profiles) {
+        if (-not (Test-Path $profile.Path -ErrorAction SilentlyContinue)) {
+            $missing += $profile.Name
+        }
+    }
+
+    if ($missing.Count -gt 0) {
+        Write-ConsoleLog "Missing monitor profiles: $($missing -join ', ')" -Level WARN
+        return $false
+    }
+    return $true
+}
+
+# ==========================
+# Single Instance Mutex
+# ==========================
+
+$script:Mutex = $null
+
+function Enter-SingleInstance {
+    param(
+        [Parameter(Mandatory)]
+        [string]$Name
+    )
+    $mutexName = "Global\ConsoleModeScripts_$Name"
+    $createdNew = $false
+
+    try {
+        $script:Mutex = New-Object System.Threading.Mutex($true, $mutexName, [ref]$createdNew)
+        if (-not $createdNew) {
+            Write-ConsoleLog "$Name is already running" -Level WARN
+            return $false
+        }
+        return $true
+    } catch {
+        Write-ConsoleLog "Failed to create mutex for $Name`: $_" -Level ERROR
+        return $false
+    }
+}
+
+function Exit-SingleInstance {
+    if ($script:Mutex) {
+        try {
+            $script:Mutex.ReleaseMutex()
+            $script:Mutex.Dispose()
+        } catch {}
+        $script:Mutex = $null
+    }
+}
+
+# ==========================
+# Controller Detection
+# ==========================
+
+function Test-ControllerConnected {
+    param(
+        [string]$VidPid = "054C*0DF2"
+    )
+    $device = Get-PnpDevice -Class 'HIDClass' -PresentOnly -ErrorAction SilentlyContinue |
+        Where-Object {
+            $_.InstanceId -like "*$VidPid*" -and
+            $_.FriendlyName -like "*game controller*"
+        }
+    return ($null -ne $device)
+}
+
+Export-ModuleMember -Function Set-RTSS-Frame-Limit, Get-ConsoleConfigDirectory, Get-ConsoleConfigPath, Initialize-ConsoleConfig, Get-ConsoleFrontend, Set-ConsoleFrontend, Get-ConsoleMode, Set-ConsoleMode, Initialize-WindowManagement, Minimize-SteamWindow, Maximize-SteamWindow, Set-WindowForeground, Get-ConsoleLogPath, Write-ConsoleLog, Show-ConsoleToast, Get-HotkeyConfig, Set-HotkeyConfig, Test-Dependencies, Test-MonitorProfiles, Enter-SingleInstance, Exit-SingleInstance, Test-ControllerConnected

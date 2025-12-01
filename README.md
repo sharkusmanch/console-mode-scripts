@@ -9,10 +9,12 @@ Scripts for switching between TV/console gaming mode and desktop/ultrawide mode 
 - Switch audio output devices
 - Manage RTSS frame rate limits
 - Launch/manage Playnite or Steam Big Picture
-- System tray icon with right-click menu
+- System tray icon with controller status indicator
 - Toast notifications on mode switch
 - Configurable hotkeys
 - Controller auto-detection (triggers TV mode when controller connects)
+- Single-instance enforcement (prevents duplicate daemons)
+- Dependency validation on startup
 - Error logging
 
 ## Hotkeys (Default)
@@ -21,44 +23,50 @@ Scripts for switching between TV/console gaming mode and desktop/ultrawide mode 
 |--------|--------|
 | `Ctrl+Shift+Alt+T` | Switch to TV/console mode |
 | `Ctrl+Shift+Alt+F` | Switch to ultrawide/desktop mode |
-| `Ctrl+Shift+Alt+Q` | Exit hotkey daemon |
+| `Ctrl+Shift+Alt+Q` | Exit daemon |
 
 Hotkeys can be customized in the config file (see Configuration section).
 
 ## Installation
 
-Install the hotkey daemon as a scheduled task:
+Install the combined daemon (hotkeys + controller monitoring) as a scheduled task:
 
 ```powershell
-.\Install-HotkeyService.ps1
+.\ConsoleDaemon.ps1 -Install
+Start-ScheduledTask -TaskName 'ConsoleDaemon'
 ```
 
 This creates a scheduled task that:
 - Starts automatically at logon
 - Restarts on session unlock (survives hibernate/wake)
 - Runs hidden in the background
-- Shows a system tray icon
+- Shows a system tray icon with controller status
 
 ### Manual Control
 
 ```powershell
 # Start the daemon
-Start-ScheduledTask -TaskName 'HotkeyDaemon'
+Start-ScheduledTask -TaskName 'ConsoleDaemon'
 
 # Stop the daemon
-Stop-ScheduledTask -TaskName 'HotkeyDaemon'
+Stop-ScheduledTask -TaskName 'ConsoleDaemon'
 
 # Check status
 .\Status.ps1
 
 # Uninstall
-.\Install-HotkeyService.ps1 -Uninstall
+.\ConsoleDaemon.ps1 -Uninstall
 ```
 
 ## System Tray
 
-When running, the daemon shows a green icon in the system tray. Right-click for:
+When running, the daemon shows a green icon in the system tray:
+- **Green square** = Running, controller disconnected
+- **Green square + blue dot** = Running, controller connected
+
+Right-click menu:
 - Status indicator
+- Controller connection status
 - Manual TV/Ultrawide mode triggers
 - Open log file
 - Open config file
@@ -68,15 +76,23 @@ When running, the daemon shows a green icon in the system tray. Right-click for:
 
 | Script | Description |
 |--------|-------------|
-| `hotkeys.ps1` | Global hotkey daemon with system tray |
-| `ControllerMonitor.ps1` | Auto-trigger TV mode when controller connects |
-| `TV.ps1` | Switch to TV mode - powers on LG TV, sets audio, caps framerate, loads TV profile, launches frontend |
+| `ConsoleDaemon.ps1` | Combined daemon with hotkeys, controller monitoring, and tray icon |
+| `TV.ps1` | Switch to TV mode - powers on LG TV, waits for display, sets audio, caps framerate, launches frontend |
 | `Ultrawide.ps1` | Switch to desktop mode - uncaps framerate, loads ultrawide profile, powers off TV |
 | `Apollo.ps1` | Launch frontend (Playnite or Steam BP) for streaming |
 | `playnite_post_game.ps1` | Re-focus Playnite after exiting a game |
 | `Status.ps1` | Display daemon status, config, and recent logs |
-| `Install-HotkeyService.ps1` | Install/uninstall the scheduled task |
-| `SharedLibrary.psm1` | Shared functions (window management, logging, config, notifications) |
+| `SharedLibrary.psm1` | Shared functions (window management, logging, config, validation) |
+
+### Legacy Scripts
+
+These are kept for backward compatibility but `ConsoleDaemon.ps1` is recommended:
+
+| Script | Description |
+|--------|-------------|
+| `hotkeys.ps1` | Standalone hotkey daemon |
+| `ControllerMonitor.ps1` | Standalone controller monitor |
+| `Install-HotkeyService.ps1` | Legacy installer for hotkeys.ps1 |
 
 ## Configuration
 
@@ -94,7 +110,11 @@ Configuration is stored in:
     "TV": { "Modifiers": ["Ctrl", "Shift", "Alt"], "Key": "T" },
     "Ultrawide": { "Modifiers": ["Ctrl", "Shift", "Alt"], "Key": "F" },
     "Quit": { "Modifiers": ["Ctrl", "Shift", "Alt"], "Key": "Q" }
-  }
+  },
+  "ControllerVidPid": "054C*0DF2",
+  "ControllerDebounceSeconds": 30,
+  "ControllerPollSeconds": 3,
+  "ControllerEnabled": true
 }
 ```
 
@@ -104,30 +124,14 @@ Configuration is stored in:
 - `Alt`
 - `Win`
 
-### Controller Auto-Detection
+### Controller Configuration
 
-The controller monitor can automatically trigger TV mode when your Bluetooth controller connects:
-
-```powershell
-# Install the controller monitor
-.\ControllerMonitor.ps1 -Install
-
-# Start it
-Start-ScheduledTask -TaskName 'ControllerMonitor'
-
-# Uninstall
-.\ControllerMonitor.ps1 -Uninstall
-```
-
-Configure the controller VID/PID and debounce time in config.json:
-
-```json
-{
-  "ControllerVidPid": "054C*0DF2",
-  "ControllerDebounceSeconds": 30,
-  "ControllerPollSeconds": 3
-}
-```
+| Option | Description | Default |
+|--------|-------------|---------|
+| `ControllerVidPid` | VID/PID pattern to match | `054C*0DF2` |
+| `ControllerDebounceSeconds` | Cooldown between triggers | `30` |
+| `ControllerPollSeconds` | Polling interval | `3` |
+| `ControllerEnabled` | Enable/disable monitoring | `true` |
 
 Common controller VID/PIDs:
 - DualSense Edge: `054C*0DF2`
@@ -161,18 +165,28 @@ View logs via:
 - [RTSS](https://www.guru3d.com/files-details/rtss-rivatuner-statistics-server-download.html) - Frame rate limiting
 - [nircmd](https://www.nirsoft.net/utils/nircmd.html) - Window management
 
+Missing dependencies are logged as warnings on startup.
+
 ## Troubleshooting
 
 ### Hotkeys not working
 1. Run `.\Status.ps1` to check if daemon is running
 2. Check the log file for errors
 3. Ensure no other app has registered the same hotkeys
-4. Restart the daemon: `Stop-ScheduledTask -TaskName 'HotkeyDaemon'; Start-ScheduledTask -TaskName 'HotkeyDaemon'`
+4. Restart the daemon: `Stop-ScheduledTask -TaskName 'ConsoleDaemon'; Start-ScheduledTask -TaskName 'ConsoleDaemon'`
 
 ### Daemon not starting after hibernate
 The scheduled task has a session unlock trigger that should restart it. If issues persist:
 1. Check Task Scheduler for errors
-2. Manually start: `Start-ScheduledTask -TaskName 'HotkeyDaemon'`
+2. Manually start: `Start-ScheduledTask -TaskName 'ConsoleDaemon'`
+
+### Controller not detected
+1. Check the VID/PID in config matches your controller
+2. Run `.\Status.ps1` to see controller status
+3. Check log file for controller monitoring messages
+
+### TV display switch fails
+The script waits up to 30 seconds for the TV to be detected as a display before switching profiles. If your TV takes longer to wake, check the logs for timing info.
 
 ### Toast notifications not showing
 Windows toast notifications require the app to be registered. If notifications fail, they're silently logged instead.
