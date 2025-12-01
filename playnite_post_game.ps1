@@ -1,8 +1,6 @@
 Import-Module "$PSScriptRoot\SharedLibrary.psm1"
 if ((Get-ConsoleMode) -ne 'Playnite') { return }
 
-# Start-Sleep -Seconds 5
-
 $steamWindow = Get-Process | Where-Object { $_.MainWindowTitle -like "*Steam*" } | Select-Object -First 1
 if ($steamWindow) {
     Add-Type '[DllImport("user32.dll")] public static extern bool ShowWindowAsync(IntPtr hWnd, int nCmdShow);' -Name Win32 -Namespace Native
