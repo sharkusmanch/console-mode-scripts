@@ -6,6 +6,8 @@ param(
     [switch]$Uninstall
 )
 
+$Version = "1.3.0"
+
 $scriptDir = $PSScriptRoot
 if (-not $scriptDir) { $scriptDir = Split-Path -Parent $MyInvocation.MyCommand.Path }
 
@@ -66,7 +68,7 @@ if ($Uninstall) {
 Add-Type -AssemblyName System.Windows.Forms
 Add-Type -AssemblyName System.Drawing
 
-Write-ConsoleLog "Console daemon starting"
+Write-ConsoleLog "Console daemon v$Version starting"
 
 # Single instance check
 if (-not (Enter-SingleInstance -Name "ConsoleDaemon")) {
@@ -92,7 +94,7 @@ $hotkeyConfig = Get-HotkeyConfig
 
 # Controller config
 $configPath = Get-ConsoleConfigPath
-$controllerVidPid = "054C*0DF2"
+$controllerVidPid = @("054C*0DF2", "2DC8*310B")  # DualSense Edge, 8BitDo
 $controllerDebounce = 30
 $controllerPollSeconds = 3
 $controllerEnabled = $true
@@ -100,7 +102,8 @@ $controllerEnabled = $true
 try {
     $cfg = Get-Content -LiteralPath $configPath -Raw -ErrorAction Stop | ConvertFrom-Json
     if ($cfg.PSObject.Properties['ControllerVidPid']) {
-        $controllerVidPid = $cfg.ControllerVidPid
+        # Support both single string and array in config
+        $controllerVidPid = @($cfg.ControllerVidPid)
     }
     if ($cfg.PSObject.Properties['ControllerDebounceSeconds']) {
         $controllerDebounce = [int]$cfg.ControllerDebounceSeconds
@@ -181,7 +184,7 @@ $form.Text = "ConsoleDaemon"
 # Create system tray icon
 $trayIcon = New-Object System.Windows.Forms.NotifyIcon
 $trayIcon.Visible = $true
-$trayIcon.Text = "Console Mode Daemon"
+$trayIcon.Text = "Console Mode Daemon v$Version"
 
 # Create icon - green square with controller indicator
 $bitmap = New-Object System.Drawing.Bitmap(16, 16)
@@ -194,6 +197,11 @@ $trayIcon.Icon = [System.Drawing.Icon]::FromHandle($bitmap.GetHicon())
 # Controller state tracking
 $script:controllerConnected = $false
 $script:lastTriggerTime = [DateTime]::MinValue
+$script:daemonStartTime = Get-Date
+$script:lastResumeTime = [DateTime]::MinValue
+$script:startupGraceSeconds = 30
+$script:resumeGraceSeconds = 30
+$script:tvModeActive = $false  # Prevents re-trigger on brief disconnects
 
 # Update tray icon based on controller state
 function Update-TrayIcon {
@@ -235,12 +243,12 @@ $contextMenu.Items.Add((New-Object System.Windows.Forms.ToolStripSeparator)) | O
 
 $menuTV = New-Object System.Windows.Forms.ToolStripMenuItem
 $menuTV.Text = "TV Mode ($(Get-HotkeyDescription $hotkeyConfig.TV))"
-$menuTV.Add_Click({ Start-Process powershell -ArgumentList "-ExecutionPolicy Bypass -WindowStyle Hidden -File `"$tvScript`"" -WindowStyle Hidden })
+$menuTV.Add_Click({ $script:tvModeActive = $true; Start-Process powershell -ArgumentList "-ExecutionPolicy Bypass -WindowStyle Hidden -File `"$tvScript`"" -WindowStyle Hidden })
 $contextMenu.Items.Add($menuTV) | Out-Null
 
 $menuUW = New-Object System.Windows.Forms.ToolStripMenuItem
 $menuUW.Text = "Ultrawide Mode ($(Get-HotkeyDescription $hotkeyConfig.Ultrawide))"
-$menuUW.Add_Click({ Start-Process powershell -ArgumentList "-ExecutionPolicy Bypass -WindowStyle Hidden -File `"$uwScript`"" -WindowStyle Hidden })
+$menuUW.Add_Click({ $script:tvModeActive = $false; Start-Process powershell -ArgumentList "-ExecutionPolicy Bypass -WindowStyle Hidden -File `"$uwScript`"" -WindowStyle Hidden })
 $contextMenu.Items.Add($menuUW) | Out-Null
 
 $contextMenu.Items.Add((New-Object System.Windows.Forms.ToolStripSeparator)) | Out-Null
@@ -316,7 +324,7 @@ $configCheckTimer.Add_Tick({
                 try {
                     $newCfg = Get-Content -LiteralPath $cfgPath -Raw -ErrorAction Stop | ConvertFrom-Json
                     if ($newCfg.PSObject.Properties['ControllerVidPid']) {
-                        $script:controllerVidPid = $newCfg.ControllerVidPid
+                        $script:controllerVidPid = @($newCfg.ControllerVidPid)
                     }
                     if ($newCfg.PSObject.Properties['ControllerDebounceSeconds']) {
                         $script:controllerDebounce = [int]$newCfg.ControllerDebounceSeconds
@@ -350,6 +358,19 @@ $configCheckTimer.Add_Tick({
 })
 
 # ==========================
+# Power Event Handler (wake from sleep detection)
+# ==========================
+
+Add-Type -AssemblyName Microsoft.VisualBasic
+[Microsoft.Win32.SystemEvents]::add_PowerModeChanged({
+    param($sender, $e)
+    if ($e.Mode -eq [Microsoft.Win32.PowerModes]::Resume) {
+        $script:lastResumeTime = Get-Date
+        Write-ConsoleLog "System resumed from sleep - grace period active for $($script:resumeGraceSeconds)s"
+    }
+})
+
+# ==========================
 # Controller Polling Timer
 # ==========================
 
@@ -370,10 +391,19 @@ $controllerTimer.Add_Tick({
         # Detect connection event
         if ($isConnected -and -not $script:controllerConnected) {
             $now = Get-Date
+            $sinceStartup = ($now - $script:daemonStartTime).TotalSeconds
+            $sinceResume = ($now - $script:lastResumeTime).TotalSeconds
             $elapsed = ($now - $script:lastTriggerTime).TotalSeconds
 
-            if ($elapsed -ge $script:controllerDebounce) {
+            if ($sinceStartup -lt $script:startupGraceSeconds) {
+                Write-ConsoleLog "Controller connected but within startup grace period ($([int]$sinceStartup)s < $($script:startupGraceSeconds)s)"
+            } elseif ($sinceResume -lt $script:resumeGraceSeconds) {
+                Write-ConsoleLog "Controller connected but within resume grace period ($([int]$sinceResume)s < $($script:resumeGraceSeconds)s)"
+            } elseif ($script:tvModeActive) {
+                Write-ConsoleLog "Controller reconnected but TV mode already active (use ultrawide to reset)"
+            } elseif ($elapsed -ge $script:controllerDebounce) {
                 $script:lastTriggerTime = $now
+                $script:tvModeActive = $true
                 Write-ConsoleLog "Controller connected - triggering TV mode"
                 Start-Process powershell -ArgumentList "-ExecutionPolicy Bypass -WindowStyle Hidden -File `"$tvScript`"" -WindowStyle Hidden
             } else {
@@ -415,7 +445,7 @@ $form.Add_Load({
     Update-TrayIcon
 
     if ($controllerEnabled) {
-        Write-ConsoleLog "Controller monitoring enabled (VID/PID: $controllerVidPid)"
+        Write-ConsoleLog "Controller monitoring enabled (VID/PID: $($controllerVidPid -join ', '))"
         $controllerTimer.Start()
     } else {
         Write-ConsoleLog "Controller monitoring disabled"
@@ -478,10 +508,12 @@ $filter.add_HotkeyPressed({
     switch ($id) {
         $HOTKEY_TV {
             Write-ConsoleLog "TV hotkey pressed"
+            $script:tvModeActive = $true
             Start-Process powershell -ArgumentList "-ExecutionPolicy Bypass -WindowStyle Hidden -File `"$tvScript`"" -WindowStyle Hidden
         }
         $HOTKEY_UW {
             Write-ConsoleLog "Ultrawide hotkey pressed"
+            $script:tvModeActive = $false
             Start-Process powershell -ArgumentList "-ExecutionPolicy Bypass -WindowStyle Hidden -File `"$uwScript`"" -WindowStyle Hidden
         }
         $HOTKEY_QUIT {

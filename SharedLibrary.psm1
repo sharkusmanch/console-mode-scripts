@@ -446,14 +446,18 @@ function Exit-SingleInstance {
 
 function Test-ControllerConnected {
     param(
-        [string]$VidPid = "054C*0DF2"
+        [string[]]$VidPid = @("054C*0DF2")
     )
-    $device = Get-PnpDevice -Class 'HIDClass' -PresentOnly -ErrorAction SilentlyContinue |
-        Where-Object {
-            $_.InstanceId -like "*$VidPid*" -and
-            $_.FriendlyName -like "*game controller*"
+    $devices = Get-PnpDevice -Class 'HIDClass' -PresentOnly -ErrorAction SilentlyContinue |
+        Where-Object { $_.FriendlyName -like "*game controller*" }
+
+    foreach ($pattern in $VidPid) {
+        $match = $devices | Where-Object { $_.InstanceId -like "*$pattern*" }
+        if ($null -ne $match) {
+            return $true
         }
-    return ($null -ne $device)
+    }
+    return $false
 }
 
 # ==========================

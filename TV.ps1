@@ -9,7 +9,13 @@ try {
     $initialDisplayCount = [System.Windows.Forms.Screen]::AllScreens.Count
     Write-ConsoleLog "Initial display count: $initialDisplayCount"
 
-    # Try multiple power-on commands in case one fails
+    # Send WOL packet first via Wi-Fi interface (TV is on different VLAN)
+    $tvMac = "DC:03:98:2C:FE:76"
+    $localIP = "192.168.12.117"
+    & "$PSScriptRoot\SendWol.ps1" -MacAddress $tvMac -LocalIP $localIP
+    Start-Sleep -Seconds 2
+
+    # Then send LGTV Companion commands
     & "$env:ProgramFiles\LGTV Companion\LGTV Companion.exe" -poweron Device1 "Living Room"
     Start-Sleep -Seconds 2
     & "$env:ProgramFiles\LGTV Companion\LGTV Companion.exe" -screenon Device1 "Living Room" -sethdmi1
