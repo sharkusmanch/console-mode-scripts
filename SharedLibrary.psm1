@@ -545,4 +545,74 @@ function Invoke-LogRotation {
     }
 }
 
-Export-ModuleMember -Function Set-RTSS-Frame-Limit, Get-ConsoleConfigDirectory, Get-ConsoleConfigPath, Initialize-ConsoleConfig, Get-ConsoleFrontend, Set-ConsoleFrontend, Get-ConsoleMode, Set-ConsoleMode, Initialize-WindowManagement, Minimize-SteamWindow, Maximize-SteamWindow, Set-WindowForeground, Get-ConsoleLogPath, Write-ConsoleLog, Show-ConsoleToast, Get-HotkeyConfig, Set-HotkeyConfig, Test-Dependencies, Test-MonitorProfiles, Get-DaemonPidPath, Test-OrphanedDaemon, Clear-OrphanedDaemons, Enter-SingleInstance, Exit-SingleInstance, Test-ControllerConnected, Switch-MonitorProfile, Invoke-LogRotation
+# ==========================
+# Home Assistant Integration
+# ==========================
+
+function Get-HomeAssistantConfig {
+    $configPath = Get-ConsoleConfigPath
+    try {
+        $cfg = Get-Content -LiteralPath $configPath -Raw -ErrorAction Stop | ConvertFrom-Json
+        if ($cfg.PSObject.Properties['HomeAssistant']) {
+            return $cfg.HomeAssistant
+        }
+    } catch {}
+    return $null
+}
+
+function Invoke-HomeAssistantService {
+    param(
+        [Parameter(Mandatory)]
+        [string]$Domain,
+        [Parameter(Mandatory)]
+        [string]$Service,
+        [hashtable]$Data = @{}
+    )
+
+    $haConfig = Get-HomeAssistantConfig
+    if (-not $haConfig -or -not $haConfig.Token) {
+        Write-ConsoleLog "Home Assistant not configured or token missing" -Level ERROR
+        return $false
+    }
+
+    $url = "$($haConfig.Url)/api/services/$Domain/$Service"
+    $headers = @{
+        "Authorization" = "Bearer $($haConfig.Token)"
+        "Content-Type" = "application/json"
+    }
+
+    try {
+        $body = $Data | ConvertTo-Json -Compress
+        $response = Invoke-RestMethod -Uri $url -Method Post -Headers $headers -Body $body -TimeoutSec 10
+        Write-ConsoleLog "HA service called: $Domain.$Service"
+        return $true
+    } catch {
+        Write-ConsoleLog "HA service call failed: $_" -Level ERROR
+        return $false
+    }
+}
+
+function Send-TvIrCommand {
+    param(
+        [Parameter(Mandatory)]
+        [string]$Command
+    )
+
+    $haConfig = Get-HomeAssistantConfig
+    if (-not $haConfig) {
+        Write-ConsoleLog "Home Assistant not configured" -Level ERROR
+        return $false
+    }
+
+    $entity = $haConfig.TvRemoteEntity
+    if (-not $entity) {
+        $entity = "remote.broadlink_rm4"
+    }
+
+    return Invoke-HomeAssistantService -Domain "remote" -Service "send_command" -Data @{
+        entity_id = $entity
+        command = $Command
+    }
+}
+
+Export-ModuleMember -Function Set-RTSS-Frame-Limit, Get-ConsoleConfigDirectory, Get-ConsoleConfigPath, Initialize-ConsoleConfig, Get-ConsoleFrontend, Set-ConsoleFrontend, Get-ConsoleMode, Set-ConsoleMode, Initialize-WindowManagement, Minimize-SteamWindow, Maximize-SteamWindow, Set-WindowForeground, Get-ConsoleLogPath, Write-ConsoleLog, Show-ConsoleToast, Get-HotkeyConfig, Set-HotkeyConfig, Test-Dependencies, Test-MonitorProfiles, Get-DaemonPidPath, Test-OrphanedDaemon, Clear-OrphanedDaemons, Enter-SingleInstance, Exit-SingleInstance, Test-ControllerConnected, Switch-MonitorProfile, Invoke-LogRotation, Get-HomeAssistantConfig, Invoke-HomeAssistantService, Send-TvIrCommand

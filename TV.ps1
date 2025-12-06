@@ -9,13 +9,22 @@ try {
     $initialDisplayCount = [System.Windows.Forms.Screen]::AllScreens.Count
     Write-ConsoleLog "Initial display count: $initialDisplayCount"
 
-    # Send WOL packet first via Wi-Fi interface (TV is on different VLAN)
+    # Try IR power via Home Assistant first (works even in deep sleep)
+    $irSent = Send-TvIrCommand -Command "tv_power"
+    if ($irSent) {
+        Write-ConsoleLog "IR power command sent via Home Assistant"
+        Start-Sleep -Seconds 3
+    } else {
+        Write-ConsoleLog "IR not available, using WOL/LGTV fallback" -Level WARN
+    }
+
+    # Send WOL packet via Wi-Fi interface (TV is on different VLAN)
     $tvMac = "DC:03:98:2C:FE:76"
     $localIP = "192.168.12.117"
     & "$PSScriptRoot\SendWol.ps1" -MacAddress $tvMac -LocalIP $localIP
     Start-Sleep -Seconds 2
 
-    # Then send LGTV Companion commands
+    # Send LGTV Companion commands for network wake + HDMI switch
     & "$env:ProgramFiles\LGTV Companion\LGTV Companion.exe" -poweron Device1 "Living Room"
     Start-Sleep -Seconds 2
     & "$env:ProgramFiles\LGTV Companion\LGTV Companion.exe" -screenon Device1 "Living Room" -sethdmi1
